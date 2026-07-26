@@ -6,6 +6,7 @@ import type {
   AgentMemoryConfig,
   ProviderConfig,
   EmbeddingConfig,
+  DiversityConfig,
   FallbackConfig,
   ClaudeBridgeConfig,
   TeamConfig,
@@ -228,6 +229,19 @@ export function loadEmbeddingConfig(): EmbeddingConfig {
     bm25Weight,
     vectorWeight,
   };
+}
+
+export function loadDiversityConfig(): DiversityConfig {
+  const env = getMergedEnv();
+  let obsPenalty = parseFloat(env["AGENTMEMORY_OBS_PENALTY"] || "0.15");
+  obsPenalty =
+    isNaN(obsPenalty) || obsPenalty < 0 ? 0.15 : Math.min(obsPenalty, 0.9);
+  const diversityScope =
+    env["AGENTMEMORY_DIVERSITY_SCOPE"] === "all" ? "all" : "observations";
+  let maxPerSession = parseInt(env["AGENTMEMORY_MAX_PER_SESSION"] || "3", 10);
+  maxPerSession =
+    isNaN(maxPerSession) || maxPerSession < 1 ? 3 : maxPerSession;
+  return { obsPenalty, diversityScope, maxPerSession };
 }
 
 export function detectEmbeddingProvider(

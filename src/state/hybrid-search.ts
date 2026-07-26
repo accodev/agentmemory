@@ -16,11 +16,14 @@ import {
 } from "../functions/graph-retrieval.js";
 import { extractEntitiesFromQuery } from "../functions/query-expansion.js";
 import { rerank } from "./reranker.js";
+import { loadDiversityConfig } from "../config.js";
+import type { DiversityConfig } from "../types.js";
 
 const RRF_K = 60;
 
 export class HybridSearch {
   private graphRetrieval: GraphRetrieval;
+  private diversityConfig: DiversityConfig;
 
   constructor(
     private bm25: SearchIndex,
@@ -31,8 +34,10 @@ export class HybridSearch {
     private vectorWeight = 0.6,
     private graphWeight = 0.3,
     private rerankEnabled = process.env.RERANK_ENABLED === "true",
+    diversityConfig?: DiversityConfig,
   ) {
     this.graphRetrieval = new GraphRetrieval(kv);
+    this.diversityConfig = diversityConfig ?? loadDiversityConfig();
   }
 
   async search(query: string, limit = 20): Promise<HybridSearchResult[]> {
@@ -213,9 +218,10 @@ export class HybridSearch {
       graphScore: s.graphScore,
       graphContext: s.graphContext,
       combinedScore:
-        effectiveBm25W * (1 / (RRF_K + s.bm25Rank)) +
-        effectiveVectorW * (1 / (RRF_K + s.vectorRank)) +
-        effectiveGraphW * (1 / (RRF_K + s.graphRank)),
+        (effectiveBm25W * (1 / (RRF_K + s.bm25Rank)) +
+          effectiveVectorW * (1 / (RRF_K + s.vectorRank)) +
+          effectiveGraphW * (1 / (RRF_K + s.graphRank))) *
+        (obsId.startsWith("obs_") ? 1 - this.diversityConfig.obsPenalty : 1),
     }));
 
     combined.sort((a, b) => b.combinedScore - a.combinedScore);
@@ -250,16 +256,21 @@ export class HybridSearch {
       graphContext?: string;
     }>,
     limit: number,
-    maxPerSession = 3,
+    maxPerSession = this.diversityConfig.maxPerSession,
   ): typeof results {
     const selected: typeof results = [];
     const sessionCounts = new Map<string, number>();
 
     for (const r of results) {
+      const capApplies =
+        this.diversityConfig.diversityScope === "all" ||
+        r.obsId.startsWith("obs_");
       const count = sessionCounts.get(r.sessionId) || 0;
-      if (count >= maxPerSession) continue;
+      if (capApplies && count >= maxPerSession) continue;
       selected.push(r);
-      sessionCounts.set(r.sessionId, count + 1);
+      // Only capped rows consume the quota; an exempt memory that happens to carry a real
+      // sessionId must not spend the budget belonging to that session's observations.
+      if (capApplies) sessionCounts.set(r.sessionId, count + 1);
       if (selected.length >= limit) break;
     }
 
