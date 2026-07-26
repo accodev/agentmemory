@@ -1,0 +1,151 @@
+name: Realign with upstream
+
+# Fork-only workflow. Opens a PR that merges rohitg00/agentmemory@main into this fork's patched
+# main. A PR rather than a direct push, so the fork's ranking patch is never silently overwritten
+# and any conflict is reviewed by a human.
+#
+# NOTE: GitHub disables scheduled workflows in forked repositories by default, and re-disables them
+# after 60 days of repository inactivity. If the daily run stops appearing, re-enable it from the
+# Actions tab. workflow_dispatch is always available as a manual trigger.
+
+on:
+  schedule:
+    - cron: '17 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: realign-upstream
+  cancel-in-progress: false
+
+env:
+  UPSTREAM: https://github.com/rohitg00/agentmemory.git
+
+jobs:
+  realign:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure git and fetch upstream
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream "$UPSTREAM"
+          git fetch --prune upstream
+
+      - name: Measure divergence
+        id: diff
+        run: |
+          behind=$(git rev-list --count origin/main..upstream/main)
+          echo "behind=$behind" >> "$GITHUB_OUTPUT"
+          echo "head=$(git rev-parse --short upstream/main)" >> "$GITHUB_OUTPUT"
+          echo "fork main is $behind commit(s) behind upstream/main"
+
+      - name: Skip if a realign PR is already open
+        id: guard
+        if: steps.diff.outputs.behind != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          open=$(gh pr list --state open --base main --json headRefName \
+                   --jq '[.[] | select(.headRefName | startswith("realign/"))] | length')
+          echo "open=$open" >> "$GITHUB_OUTPUT"
+          if [ "$open" != "0" ]; then echo "a realign PR is still open; skipping"; fi
+
+      - name: Merge upstream
+        id: merge
+        if: steps.diff.outputs.behind != '0' && steps.guard.outputs.open == '0'
+        run: |
+          branch="realign/$(date -u +%Y-%m-%d)"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          git log --oneline --no-merges origin/main..upstream/main > /tmp/commits.txt
+          git checkout -B "$branch" origin/main
+          if git merge --no-edit upstream/main; then
+            echo "clean=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "clean=false" >> "$GITHUB_OUTPUT"
+            git diff --name-only --diff-filter=U > /tmp/conflicts.txt
+            git merge --abort
+          fi
+
+      - name: Open an issue when the merge conflicts
+        if: steps.merge.outputs.clean == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          {
+            echo "Automated realignment could not merge cleanly."
+            echo
+            echo "Upstream head \`${{ steps.diff.outputs.head }}\`, ${{ steps.diff.outputs.behind }} commit(s) ahead of this fork's \`main\`."
+            echo
+            echo "Conflicting files:"
+            echo '```'; cat /tmp/conflicts.txt; echo '```'
+            echo
+            echo "Upstream commits in range:"
+            echo '```'; cat /tmp/commits.txt; echo '```'
+            echo
+            echo "Nothing was pushed, so no branch is left in a broken state. Resolve locally:"
+            echo '```'
+            echo "git fetch upstream && git checkout -b ${{ steps.merge.outputs.branch }} origin/main && git merge upstream/main"
+            echo '```'
+          } > /tmp/issue.md
+          gh issue create --title "realign: manual merge needed for upstream@${{ steps.diff.outputs.head }}" --body-file /tmp/issue.md
+
+      - uses: actions/setup-node@v4
+        if: steps.merge.outputs.clean == 'true'
+        with:
+          node-version: 22
+
+      - name: Run tests on the merged tree
+        id: tests
+        if: steps.merge.outputs.clean == 'true'
+        run: |
+          npm ci --no-audit --no-fund || npm install --no-audit --no-fund
+          # The suite carries pre-existing failures unrelated to this fork's patch, so the run must
+          # not gate the PR; the counts go in the PR body for a human to compare against baseline.
+          set +e
+          npx vitest run > /tmp/test.log 2>&1
+          set -e
+          full=$(grep -E '^\s*Tests\s+[0-9]' /tmp/test.log | tail -1)
+          npx vitest run test/hybrid-search.test.ts > /tmp/patch.log 2>&1 || true
+          patch=$(grep -E '^\s*Tests\s+[0-9]' /tmp/patch.log | tail -1)
+          echo "full=${full:-unparsed}" >> "$GITHUB_OUTPUT"
+          echo "patch=${patch:-unparsed}" >> "$GITHUB_OUTPUT"
+
+      - name: Push and open the PR
+        if: steps.merge.outputs.clean == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git push -u origin "${{ steps.merge.outputs.branch }}"
+          {
+            echo "Automated daily realignment of this fork's patched \`main\` with rohitg00/agentmemory."
+            echo
+            echo "Upstream head \`${{ steps.diff.outputs.head }}\`, ${{ steps.diff.outputs.behind }} commit(s) ahead."
+            echo
+            echo "Upstream commits merged:"
+            echo '```'; cat /tmp/commits.txt; echo '```'
+            echo
+            echo "| check | result |"
+            echo "| --- | --- |"
+            echo "| full suite | \`${{ steps.tests.outputs.full }}\` |"
+            echo "| fork patch (\`test/hybrid-search.test.ts\`) | \`${{ steps.tests.outputs.patch }}\` |"
+            echo
+            echo "The full suite has pre-existing failures unrelated to this fork; compare the count"
+            echo "to the previous realign PR rather than expecting zero. **The patch suite must be 14/14** —"
+            echo "if it is not, the merge broke the fork's ranking changes."
+            echo
+            echo "Also confirm the patch survived:"
+            echo "- \`src/state/hybrid-search.ts\` still scopes the diversity cap and applies the \`obs_\` prior"
+            echo "- \`src/config.ts\` still exports \`loadDiversityConfig\`"
+          } > /tmp/pr.md
+          gh pr create --base main --head "${{ steps.merge.outputs.branch }}" \
+            --title "realign: merge upstream@${{ steps.diff.outputs.head }} into main" \
+            --body-file /tmp/pr.md
