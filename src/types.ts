@@ -346,6 +346,12 @@ export interface EmbeddingConfig {
   vectorWeight: number;
 }
 
+export interface DiversityConfig {
+  obsPenalty: number;
+  diversityScope: "observations" | "all";
+  maxPerSession: number;
+}
+
 export interface FallbackConfig {
   providers: ProviderType[];
 }
