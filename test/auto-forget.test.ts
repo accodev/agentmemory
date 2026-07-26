@@ -108,6 +108,8 @@ describe("Auto-Forget Function", () => {
     });
     await kv.set("mem:memories", "mem_1", mem1);
     await kv.set("mem:memories", "mem_2", mem2);
+    getSearchIndex().add(memoryToObservation(mem1));
+    getSearchIndex().add(memoryToObservation(mem2));
 
     const result = (await sdk.trigger("mem::auto-forget", {})) as {
       contradictions: Array<{
@@ -120,6 +122,8 @@ describe("Auto-Forget Function", () => {
     expect(result.contradictions.length).toBe(1);
     const older = await kv.get<Memory>("mem:memories", "mem_1");
     expect(older!.isLatest).toBe(false);
+    // The superseded memory must not keep competing in BM25 retrieval.
+    expect(getSearchIndex().has("mem_1")).toBe(false);
   });
 
   it("evicts low-value old observations", async () => {

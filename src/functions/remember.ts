@@ -6,7 +6,7 @@ import { withKeyedLock } from "../state/keyed-mutex.js";
 import { memoryToObservation } from "../state/memory-utils.js";
 import { deleteAccessLog } from "./access-tracker.js";
 import { recordAudit } from "./audit.js";
-import { getSearchIndex, vectorIndexAddGuarded, vectorIndexRemove, flushIndexSave } from "./search.js";
+import { getSearchIndex, vectorIndexAddGuarded, vectorIndexRemove, flushIndexSave, removeSupersededFromIndex } from "./search.js";
 import { getAgentId } from "../config.js";
 import { logger } from "../logger.js";
 
@@ -124,6 +124,7 @@ export function registerRememberFunction(sdk: ISdk, kv: StateKV): void {
         if (supersededMemory) {
           supersededMemory.isLatest = false;
           await kv.set(KV.memories, supersededMemory.id, supersededMemory);
+          removeSupersededFromIndex(supersededMemory.id);
         }
         await kv.set(KV.memories, memory.id, memory);
 

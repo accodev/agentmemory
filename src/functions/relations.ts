@@ -6,6 +6,7 @@ import { withKeyedLock } from "../state/keyed-mutex.js";
 import { safeAudit } from "./audit.js";
 import { recordAccessBatch } from "./access-tracker.js";
 import { logger } from "../logger.js";
+import { removeSupersededFromIndex, indexMemory } from "./search.js";
 
 function computeConfidence(
   source: Memory,
@@ -154,6 +155,7 @@ export function registerRelationsFunction(sdk: ISdk, kv: StateKV): void {
 
       existing.isLatest = false;
       await kv.set(KV.memories, existing.id, existing);
+      removeSupersededFromIndex(existing.id);
       await safeAudit(kv, "evolve", "mem::evolve", [existing.id], {
         operation: "evolve",
         action: "mark_non_latest",
@@ -161,6 +163,7 @@ export function registerRelationsFunction(sdk: ISdk, kv: StateKV): void {
       });
 
       await kv.set(KV.memories, evolved.id, evolved);
+      await indexMemory(evolved);
       await safeAudit(kv, "evolve", "mem::evolve", [evolved.id], {
         operation: "evolve",
         oldId: existing.id,

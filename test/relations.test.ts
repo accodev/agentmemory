@@ -5,6 +5,8 @@ vi.mock("../src/logger.js", () => ({
 }));
 
 import { registerRelationsFunction } from "../src/functions/relations.js";
+import { getSearchIndex } from "../src/functions/search.js";
+import { memoryToObservation } from "../src/state/memory-utils.js";
 import type { Memory } from "../src/types.js";
 
 function mockKV() {
@@ -155,6 +157,26 @@ describe("Relations Functions", () => {
       });
 
       expect((result as { success: boolean }).success).toBe(false);
+    });
+
+    it("removes the superseded memory from BM25 and indexes the new version", async () => {
+      const original = makeMemory({
+        id: "mem_evolve_bm25",
+        title: "Elephant migration tracking heuristic",
+        content: "Old heuristic for tracking elephant migration patterns",
+      });
+      await kv.set("mem:memories", "mem_evolve_bm25", original);
+      getSearchIndex().add(memoryToObservation(original));
+      expect(getSearchIndex().has("mem_evolve_bm25")).toBe(true);
+
+      const result = (await sdk.trigger("mem::evolve", {
+        memoryId: "mem_evolve_bm25",
+        newContent: "New heuristic for tracking elephant migration patterns",
+      })) as { success: boolean; memory: Memory };
+
+      expect(result.success).toBe(true);
+      expect(getSearchIndex().has("mem_evolve_bm25")).toBe(false);
+      expect(getSearchIndex().has(result.memory.id)).toBe(true);
     });
   });
 

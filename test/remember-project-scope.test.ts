@@ -201,6 +201,9 @@ describe("mem::remember — cross-project dedup isolation", () => {
 
     const original = await kv.get<{ isLatest: boolean }>("mem:memories", first.memory.id);
     expect(original?.isLatest).toBe(false);
+
+    // The superseded memory must not keep competing in BM25 retrieval.
+    expect(getSearchIndex().has(first.memory.id)).toBe(false);
   });
 
   it("allows an unscoped memory to be superseded by a scoped one (legacy compat)", async () => {

@@ -3,6 +3,7 @@ import type { StateKV } from "../state/kv.js";
 import { KV } from "../state/schema.js";
 import { withKeyedLock } from "../state/keyed-mutex.js";
 import { recordAudit } from "./audit.js";
+import { removeSupersededFromIndex } from "./search.js";
 import type {
   Action,
   ActionEdge,
@@ -1037,6 +1038,7 @@ export function registerDiagnosticsFunction(sdk: ISdk, kv: StateKV): void {
                 fresh.isLatest = false;
                 fresh.updatedAt = new Date().toISOString();
                 await kv.set(KV.memories, fresh.id, fresh);
+                removeSupersededFromIndex(fresh.id);
                 await recordAudit(kv, "heal", "mem::heal", [fresh.id], {
                   entityType: "memory",
                   reason: "superseded-memory-mark-non-latest",

@@ -39,6 +39,56 @@ export function vectorIndexRemove(id: string): void {
   vectorIndex?.remove(id);
 }
 
+// Every supersede site (remember/evolve/consolidate/auto-forget/heal) flips
+// isLatest on the stale row and, for evolve/consolidate, creates a
+// replacement. rebuildIndex() only repopulates BM25/vector from KV when the
+// persisted index is empty at boot, so between restarts these two helpers
+// are the only thing keeping the live indexes in sync with isLatest — skip
+// them and the stale row keeps competing in search while the replacement
+// (if any) stays unembedded until the next empty-index rebuild.
+export function removeSupersededFromIndex(id: string): void {
+  try {
+    getSearchIndex().remove(id);
+  } catch (err) {
+    logger.warn("Failed to remove superseded memory from BM25", {
+      memId: id,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+  try {
+    vectorIndexRemove(id);
+  } catch (err) {
+    logger.warn("Failed to remove superseded memory from vector index", {
+      memId: id,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+export async function indexMemory(memory: Memory): Promise<void> {
+  try {
+    getSearchIndex().add(memoryToObservation(memory));
+  } catch (err) {
+    logger.warn("Failed to index memory into BM25", {
+      memId: memory.id,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+  try {
+    await vectorIndexAddGuarded(
+      memory.id,
+      memory.sessionIds?.[0] ?? "memory",
+      memory.title + " " + memory.content,
+      { kind: "memory", logId: memory.id },
+    );
+  } catch (err) {
+    logger.warn("Failed to index memory into vector index", {
+      memId: memory.id,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
 // Persistence sync hook. Without this, index removals only live in
 // memory; a crash/SIGKILL before graceful shutdown reloads a stale
 // snapshot at boot and the deleted entry resurrects in the index.

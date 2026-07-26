@@ -8,6 +8,7 @@ import type {
 import { KV, generateId } from "../state/schema.js";
 import { StateKV } from "../state/kv.js";
 import { recordAudit } from "./audit.js";
+import { removeSupersededFromIndex, indexMemory } from "./search.js";
 
 const CONSOLIDATION_SYSTEM = `You are a memory consolidation engine. Given a set of related observations from coding sessions, synthesize them into a single long-term memory.
 
@@ -175,6 +176,7 @@ export function registerConsolidateFunction(
           if (existingMatch) {
             existingMatch.isLatest = false;
             await kv.set(KV.memories, existingMatch.id, existingMatch);
+            removeSupersededFromIndex(existingMatch.id);
             await recordAudit(kv, "evolve", "mem::consolidate", [existingMatch.id], {
               action: "mark_non_latest",
               concept,
@@ -196,6 +198,7 @@ export function registerConsolidateFunction(
               ...(scopedProject !== undefined && { project: scopedProject }),
             };
             await kv.set(KV.memories, evolved.id, evolved);
+            await indexMemory(evolved);
             await recordAudit(kv, "evolve", "mem::consolidate", [evolved.id], {
               action: "evolve_memory",
               oldId: existingMatch.id,

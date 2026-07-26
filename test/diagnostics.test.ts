@@ -18,6 +18,8 @@ import type {
   MeshPeer,
 } from "../src/types.js";
 import { KV } from "../src/state/schema.js";
+import { getSearchIndex } from "../src/functions/search.js";
+import { memoryToObservation } from "../src/state/memory-utils.js";
 
 function mockKV() {
   const store = new Map<string, Map<string, unknown>>();
@@ -613,6 +615,29 @@ describe("Diagnostics Functions", () => {
 
       const updated = await kv.get<Sentinel>(KV.sentinels, sentinel.id);
       expect(updated!.status).toBe("expired");
+    });
+
+    it("marks superseded memory non-latest and removes it from the BM25 index", async () => {
+      const oldMemory = makeMemory({ id: "mem_heal_old", isLatest: true });
+      const newMemory = makeMemory({
+        id: "mem_heal_new",
+        supersedes: [oldMemory.id],
+      });
+      await kv.set(KV.memories, oldMemory.id, oldMemory);
+      await kv.set(KV.memories, newMemory.id, newMemory);
+      getSearchIndex().add(memoryToObservation(oldMemory));
+      expect(getSearchIndex().has(oldMemory.id)).toBe(true);
+
+      const result = (await sdk.trigger("mem::heal", {
+        categories: ["memories"],
+      })) as { success: boolean; fixed: number; details: string[] };
+
+      expect(result.success).toBe(true);
+      expect(result.fixed).toBe(1);
+
+      const updated = await kv.get<Memory>(KV.memories, oldMemory.id);
+      expect(updated!.isLatest).toBe(false);
+      expect(getSearchIndex().has(oldMemory.id)).toBe(false);
     });
 
     it("dry run reports but does not fix", async () => {

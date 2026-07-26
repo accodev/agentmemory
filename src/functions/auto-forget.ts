@@ -4,7 +4,7 @@ import { KV } from "../state/schema.js";
 import { StateKV } from "../state/kv.js";
 import { recordAudit } from "./audit.js";
 import { deleteAccessLog } from "./access-tracker.js";
-import { getSearchIndex, vectorIndexRemove, flushIndexSave } from "./search.js";
+import { getSearchIndex, vectorIndexRemove, flushIndexSave, removeSupersededFromIndex } from "./search.js";
 import { logger } from "../logger.js";
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -132,6 +132,7 @@ export function registerAutoForgetFunction(sdk: ISdk, kv: StateKV): void {
                     : memB;
                 older.isLatest = false;
                 await kv.set(KV.memories, older.id, older);
+                removeSupersededFromIndex(older.id);
                 await recordAudit(kv, "forget", "mem::auto-forget", [older.id], {
                   resource: "memory",
                   reason: "auto-forget contradiction",

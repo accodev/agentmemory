@@ -9,6 +9,8 @@ vi.mock("../src/functions/audit.js", () => ({
 }));
 
 import { registerConsolidateFunction } from "../src/functions/consolidate.js";
+import { getSearchIndex } from "../src/functions/search.js";
+import { memoryToObservation } from "../src/state/memory-utils.js";
 import { KV } from "../src/state/schema.js";
 import type { CompressedObservation, Memory, MemoryProvider, Session } from "../src/types.js";
 
@@ -160,6 +162,7 @@ describe("mem::consolidate — cross-project existingMatch guard", () => {
     // A memory already scoped to "api" with the same title
     const apiMemory = makeExistingMemory("mem_api_old", "synthesized memory title", "api");
     await kv.set(KV.memories, apiMemory.id, apiMemory);
+    getSearchIndex().add(memoryToObservation(apiMemory));
 
     const apiSession = makeSession("sess_api", "api");
     await kv.set(KV.sessions, apiSession.id, apiSession);
@@ -184,6 +187,11 @@ describe("mem::consolidate — cross-project existingMatch guard", () => {
     expect(latestApi).toHaveLength(1);
     expect(latestApi[0].id).not.toBe(apiMemory.id);
     expect(latestApi[0].parentId).toBe(apiMemory.id);
+
+    // The superseded memory must not keep competing in BM25 retrieval,
+    // and the evolved successor must be findable in its place.
+    expect(getSearchIndex().has(apiMemory.id)).toBe(false);
+    expect(getSearchIndex().has(latestApi[0].id)).toBe(true);
   });
 
   it("unscoped consolidation may evolve any existing memory regardless of project (background cron behavior)", async () => {
