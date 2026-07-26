@@ -12,6 +12,7 @@ import {
   isConsolidationEnabled,
   isContextInjectionEnabled,
   isDropStaleIndexEnabled,
+  isForceReindexEnabled,
 } from "./config.js";
 import {
   createProvider,
@@ -446,7 +447,14 @@ async function main() {
     }
   }
 
-  const needsRebuild = bm25Index.size === 0;
+  const forceReindex = isForceReindexEnabled();
+  const needsRebuild = bm25Index.size === 0 || forceReindex;
+
+  if (forceReindex) {
+    bootLog(
+      `AGENTMEMORY_FORCE_REINDEX=true set — forcing a full search index rebuild`,
+    );
+  }
 
   if (needsRebuild) {
     // Fire-and-forget. rebuildIndex iterates every observation across

@@ -491,7 +491,9 @@ export function registerSearchFunction(sdk: ISdk, kv: StateKV): void {
           const mem = await kv
             .get<Memory>(KV.memories, r.obsId)
             .catch(() => null)
-          return mem ? memoryToObservation(mem) : null
+          // superseded rows aren't removed from the index on evolve, so
+          // guard here too — see hybrid-search.ts enrichResults.
+          return mem && mem.isLatest !== false ? memoryToObservation(mem) : null
         })
       )
       const enriched: SearchResult[] = []

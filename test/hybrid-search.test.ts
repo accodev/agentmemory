@@ -503,6 +503,90 @@ describe("HybridSearch", () => {
     });
   });
 
+  describe("superseded memory filtering", () => {
+    function makeMemoryOverride(
+      id: string,
+      overrides: Record<string, unknown> = {},
+    ) {
+      return { ...makeMemory(id), ...overrides };
+    }
+
+    it("excludes a superseded (isLatest: false) row even when it lexically outranks its replacement", async () => {
+      const superseded = makeObs({
+        id: "mem_old",
+        sessionId: "memory",
+        title: "beacon status beacon status",
+        narrative: "beacon beacon beacon beacon status status status",
+        concepts: ["beacon"],
+      });
+      const latest = makeObs({
+        id: "mem_new",
+        sessionId: "memory",
+        title: "beacon status",
+        narrative: "beacon status",
+        concepts: ["beacon"],
+      });
+      bm25.add(superseded);
+      bm25.add(latest);
+      await kv.set(
+        "mem:memories",
+        "mem_old",
+        makeMemoryOverride("mem_old", { isLatest: false }),
+      );
+      await kv.set(
+        "mem:memories",
+        "mem_new",
+        makeMemoryOverride("mem_new", { isLatest: true }),
+      );
+
+      const hybrid = new HybridSearch(bm25, null, null, kv as never);
+      const results = await hybrid.search("beacon status");
+
+      expect(results.some((r) => r.observation.id === "mem_old")).toBe(false);
+      expect(results.some((r) => r.observation.id === "mem_new")).toBe(true);
+    });
+
+    it("still surfaces legacy rows missing the isLatest field", async () => {
+      const legacy = makeObs({
+        id: "mem_legacy",
+        sessionId: "memory",
+        title: "gizmo status",
+        narrative: "gizmo status",
+        concepts: ["gizmo"],
+      });
+      bm25.add(legacy);
+      const legacyMemory: Record<string, unknown> = makeMemory("mem_legacy");
+      delete legacyMemory.isLatest;
+      await kv.set("mem:memories", "mem_legacy", legacyMemory);
+
+      const hybrid = new HybridSearch(bm25, null, null, kv as never);
+      const results = await hybrid.search("gizmo status");
+
+      expect(results.some((r) => r.observation.id === "mem_legacy")).toBe(true);
+    });
+
+    it("leaves isLatest: true rows unaffected", async () => {
+      const current = makeObs({
+        id: "mem_current",
+        sessionId: "memory",
+        title: "widget status",
+        narrative: "widget status",
+        concepts: ["widget"],
+      });
+      bm25.add(current);
+      await kv.set(
+        "mem:memories",
+        "mem_current",
+        makeMemoryOverride("mem_current", { isLatest: true }),
+      );
+
+      const hybrid = new HybridSearch(bm25, null, null, kv as never);
+      const results = await hybrid.search("widget status");
+
+      expect(results.some((r) => r.observation.id === "mem_current")).toBe(true);
+    });
+  });
+
   describe("upstream equivalence escape hatch", () => {
     it("reproduces exact RRF scores with obsPenalty=0, scope=all", async () => {
       const docA = makeObs({

@@ -200,6 +200,14 @@ export function isDropStaleIndexEnabled(): boolean {
   return getMergedEnv()["AGENTMEMORY_DROP_STALE_INDEX"] === "true";
 }
 
+// Escape hatch to force a rebuild without deleting persisted index state —
+// e.g. evolve/consolidate/auto-forget leave stale ids in the index that
+// only rebuildIndex() strips, but the boot-time gate only fires when the
+// index is empty.
+export function isForceReindexEnabled(): boolean {
+  return getMergedEnv()["AGENTMEMORY_FORCE_REINDEX"] === "true";
+}
+
 export function detectLlmProviderKind(): "llm" | "noop" {
   const env = getMergedEnv();
   if (

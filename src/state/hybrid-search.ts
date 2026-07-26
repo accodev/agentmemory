@@ -312,7 +312,10 @@ export class HybridSearch {
         const mem = await this.kv
           .get<Memory>(KV.memories, r.obsId)
           .catch(() => null);
-        return mem ? memoryToObservation(mem) : null;
+        // evolve/consolidate/auto-forget flip isLatest without removing the
+        // old id from the BM25/vector index, so a superseded row can still
+        // surface here — the query path must not trust the index alone.
+        return mem && mem.isLatest !== false ? memoryToObservation(mem) : null;
       }),
     );
     const enriched: HybridSearchResult[] = [];
