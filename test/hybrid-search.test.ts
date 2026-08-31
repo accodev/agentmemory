@@ -630,11 +630,16 @@ describe("HybridSearch", () => {
       );
       const results = await hybrid.search("beacon status");
 
-      // Only bm25 leg is active, so effectiveBm25W === 1 and
-      // combinedScore === 1 / (60 + rank) for each result's bm25 rank.
+      // Only the bm25 leg is active, so the raw weighted score is 1 / (60 + rank).
+      // Upstream now normalizes once per query by the best attainable score
+      // (maxAttainable === 1 / (RRF_K + 1) for a single active stream), so the
+      // top hit scores 1.0 and rank r scores (RRF_K + 1) / (RRF_K + r). The
+      // agreement bonus is 1x here because only one stream matched. With
+      // obsPenalty=0 the fork's diversity multiplier is also exactly 1, which is
+      // what this escape hatch asserts: fork === upstream when the cap is off.
       const RRF_K = 60;
       results.forEach((r, i) => {
-        expect(r.combinedScore).toBeCloseTo(1 / (RRF_K + (i + 1)), 10);
+        expect(r.combinedScore).toBeCloseTo((RRF_K + 1) / (RRF_K + (i + 1)), 10);
       });
     });
   });
