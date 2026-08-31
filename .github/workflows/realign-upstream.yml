@@ -75,13 +75,19 @@ jobs:
             git merge --abort
           fi
 
-      - name: Open an issue when the merge conflicts
+      # Reporting must never be the thing that fails. Issues are disabled on forks by default,
+      # so `gh issue create` returned "Resource not accessible by integration (createIssue)" and
+      # killed the job before the conflict reached anyone -- every scheduled run from 2026-08-24
+      # to 2026-08-31 died here while the fork silently drifted 16 commits behind upstream.
+      # The job summary needs no permissions and always works, so it is the primary channel;
+      # the issue is a best-effort extra.
+      - name: Report the conflict
         if: steps.merge.outputs.clean == 'false'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           {
-            echo "Automated realignment could not merge cleanly."
+            echo "## Automated realignment could not merge cleanly"
             echo
             echo "Upstream head \`${{ steps.diff.outputs.head }}\`, ${{ steps.diff.outputs.behind }} commit(s) ahead of this fork's \`main\`."
             echo
@@ -95,8 +101,14 @@ jobs:
             echo '```'
             echo "git fetch upstream && git checkout -b ${{ steps.merge.outputs.branch }} origin/main && git merge upstream/main"
             echo '```'
-          } > /tmp/issue.md
-          gh issue create --title "realign: manual merge needed for upstream@${{ steps.diff.outputs.head }}" --body-file /tmp/issue.md
+          } > /tmp/report.md
+          cat /tmp/report.md >> "$GITHUB_STEP_SUMMARY"
+          gh issue create \
+            --title "realign: manual merge needed for upstream@${{ steps.diff.outputs.head }}" \
+            --body-file /tmp/report.md \
+            || echo "::warning::Could not open an issue (Issues disabled on this fork, or the token lacks issues:write). The full conflict report is in the job summary."
+          echo "::error::Upstream realignment conflicts in $(tr '\n' ' ' < /tmp/conflicts.txt)- see the job summary."
+          exit 1
 
       - uses: actions/setup-node@v4
         if: steps.merge.outputs.clean == 'true'
